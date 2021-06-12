@@ -125,19 +125,25 @@ func (i *Controller) syncPodRules(podIP, globalIP string, addRules bool) error {
 }
 
 func (i *Controller) syncServiceRules(service *k8sv1.Service, globalIP string, addRules bool) error {
-	chainName, chainExists, err := i.kubeProxyClusterIPServiceChainName(service)
-	if err != nil {
-		return err
-	}
+	chainName := i.generateSubmServiceChainName(service)
 
-	if !chainExists {
-		// This shouldn't happen here as we check for this earlier.
-		return nil
+	if addRules {
+		err := i.updateSubmServiceChain(service, chainName, addRules)
+		if err != nil {
+			return err
+		}
 	}
 
 	err = i.updateIngressRulesForService(globalIP, chainName, addRules)
 	if err != nil {
 		return fmt.Errorf("error updating ingress rules for service %#v: %v", service, err)
+	}
+
+	if !addRules {
+		err := i.updateSubmServiceChain(service, chainName, addRules)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

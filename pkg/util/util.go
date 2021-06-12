@@ -185,6 +185,42 @@ func CreateChainIfNotExists(ipt iptables.Interface, table, chain string) error {
 	return ipt.NewChain(table, chain)
 }
 
+func ClearAndDeleteChainIfExists(ipt iptables.Interface, table, chain string) error {
+	if exists, err := ipt.ChainExists(table, chain); err != nil {
+		return err
+	} else if !exists {
+		// Already not exists
+		return nil
+	}
+
+	if err := ipt.ClearAndDeleteChain(table, chain); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ListRules(ipt iptables.Interface, table, chain string) ([]string, error) {
+	rules := []string{}
+	if exists, err := ipt.ChainExists(table, chain); err != nil {
+		return rules, err
+	} else if !exists {
+		return rules, nil
+	}
+
+	ruleStr, err := ipt.List(table, chain)
+	if err != nil {
+		return rules, err
+	}
+	for _, rule := range strings.Split(ruleStr, "\n") {
+		if strings.HasPrefix(rule, "-A") {
+			rules = append(rules, rule)
+		}
+	}
+
+	return nil
+}
+
 func PrependUnique(ipt iptables.Interface, table, chain string, ruleSpec []string) error {
 	// Submariner requires certain iptable rules to be programmed at the beginning of an iptables Chain
 	// so that we can preserve the sourceIP for inter-cluster traffic and avoid K8s SDN making changes

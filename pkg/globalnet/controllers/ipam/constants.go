@@ -34,7 +34,10 @@ const (
 	// of kube-proxy changes, globalnet needs to be modified accordingly.
 	// Reference: https://bit.ly/2OPhlwk
 	kubeProxyServiceChainPrefix = "KUBE-SVC-"
+	submServiceChainPrefix      = "SUBM-SVC-"
 	kubeProxyServiceChainName   = "KUBE-SERVICES"
+	kubeEndpointChainPrefix     = "KUBE-SEP-"
+	submEndpointChainPrefix     = "SUBM-SEP-"
 
 	maxServiceRequeues = 20
 
