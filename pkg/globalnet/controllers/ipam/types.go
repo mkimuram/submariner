@@ -41,6 +41,7 @@ type Controller struct {
 	serviceExportSyncer syncer.Interface
 	syncers             []syncer.Interface
 	serviceClient       dynamic.NamespaceableResourceInterface
+	endpointsClient     dynamic.NamespaceableResourceInterface
 	scheme              *runtime.Scheme
 	gwNodeName          string
 

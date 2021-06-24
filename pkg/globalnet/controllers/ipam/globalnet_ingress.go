@@ -19,6 +19,7 @@ limitations under the License.
 package ipam
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base32"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/submariner-io/admiral/pkg/log"
 	k8sv1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog"
 
 	"github.com/submariner-io/submariner/pkg/routeagent_driver/constants"
@@ -111,34 +113,49 @@ func (i *Controller) updateSubmServiceChain(service *k8sv1.Service, submChain st
 			return err
 		}
 
-		// Get the chain name of kube-proxy for the service
-		kubeChain, exist, err := i.kubeProxyClusterIPServiceChainName(service)
+		// Get endpoints
+		obj, err := i.serviceClient.Namespace(service.Namespace).Get(context.TODO(), metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
 
-		// Get rules in the kube-proxy chain
-		var kubeRules []string
-		if exist {
-			// Get rules in the subm chain
-			kubeRules, err = ListRules(i.ipt, "nat", kubeChain)
-			if err != nil {
-				return err
+		var endpoints *k8sv1.Endpoints
+		err = runtime.DefaultUnstructuredConverter.FromUnstructured(obj, endpoints)
+		if err != nil {
+			return err
+		}
+
+		// Extract endpoints
+		eps := []string{}
+		for _, es := range endpoints.Subsets {
+			for _, port := range es.Ports {
+				if port.Port == 0 {
+					continue
+				}
+				for _, addr := range es.Addresses {
+					eps = append(eps, fmt.Sprintf("%s:%s", addr.IP, port.Port))
+					// TODO: Protocol also needs to be stored
+				}
 			}
 		}
-		kubeJumpedChains := toJumpedChainMap(kubeRules)
 
-		// Get rules in the subm chain
-		submRules, err := ListRules(i.ipt, "nat", submChain)
+		// Generate rules for the endpoints
+		var newRules []string
+		for i, es := range eps {
+			// TODO: Generate rules
+		}
+		newJumpedChains := toJumpedChainMap(newRules)
+
+		// Get old rules in the subm chain
+		oldRules, err := ListRules(i.ipt, "nat", submChain)
 		if err != nil {
 			return err
 		}
-		submJumpedChains := toJumpedChainMap(submRules)
+		oldJumpedChains := toJumpedChainMap(oldRules)
 
 		// Delete stale chain and delete jump rule for it
-		for submChain := range submJumpedChains {
-			kubeJumpedChainName := toKubeSepChainName(submChain)
-			if rule, ok := kubeJumpedChains[kubeJumpedChainName]; !ok {
+		for oldChain := range oldJumpedChains {
+			if rule, ok := newJumpedChains[oldChain]; !ok {
 				// Delete jump rule to the chain
 				ruleSpec := strings.Fields(rule)
 				if err := i.ipt.Delete("nat", submChain, ruleSpec...); err != nil {
@@ -155,17 +172,16 @@ func (i *Controller) updateSubmServiceChain(service *k8sv1.Service, submChain st
 		}
 
 		// Add new chain and add jump rule for it
-		for kubeChain, kubeRule := range kubeJumpedChains {
-			submJumpedChainName := toSubmSepChainName(kubeChain)
-			if rule, ok := submJumpedChains[submJumpedChainName]; !ok {
+		for newChain, newRule := range newJumpedChains {
+			if rule, ok := oldJumpedChains[newChain]; !ok {
 				// Add jumped chain
 				ruleSpec := strings.Fields(rule)
-				if err := i.ipt.AppendUnique("nat", submJumpedChainName, ruleSpec...); err != nil {
+				if err := i.ipt.AppendUnique("nat", newChain, ruleSpec...); err != nil {
 					return err
 				}
 
 				// Add jump rule to the chain
-				jumpRuleSpec := strings.Fields(strings.Relace(kubeRule, kubeChain, submJumpedChainName))
+				jumpRuleSpec := strings.Fields(newRule)
 				if err := i.ipt.AppendUnique("nat", submChain, jumpRuleSpec...); err != nil {
 					return err
 				}
@@ -207,14 +223,6 @@ func toJumpedChainMap(rules []string) map[string]string {
 	}
 
 	return cm
-}
-
-func toKubeSepChainName(submChainName string) string {
-	return strings.Relace(submChainName, submEndpointChainPrefix, kubeEndpointChainPrefix)
-}
-
-func toSubmSepChainName(kubeChainName string) string {
-	return strings.Relace(kubeChainName, kubeEndpointChainPrefix, submEndpointChainPrefix)
 }
 
 func (i *Controller) doesIPTablesChainExist(table, chain string) (bool, error) {

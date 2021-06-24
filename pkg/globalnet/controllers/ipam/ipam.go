@@ -59,6 +59,11 @@ func NewController(spec *SubmarinerIPAMControllerSpecification, config syncer.Re
 			Version:  k8sv1.SchemeGroupVersion.Version,
 			Resource: "services",
 		}),
+		endpointsClient: config.SourceClient.Resource(schema.GroupVersionResource{
+			Group:    k8sv1.SchemeGroupVersion.Group,
+			Version:  k8sv1.SchemeGroupVersion.Version,
+			Resource: "endpoints",
+		}),
 		scheme:            config.Scheme,
 		gwNodeName:        gwNodeName,
 		excludeNamespaces: exclusionMap,
