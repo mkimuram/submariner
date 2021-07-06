@@ -50,3 +50,4 @@ replace (
 	// CVE-2020-14040
 	golang.org/x/text => golang.org/x/text v0.3.6
 )
+replace github.com/submariner-io/shipyard => ../shipyard
