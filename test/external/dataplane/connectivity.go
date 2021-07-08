@@ -82,33 +82,33 @@ func testExternalConnectivity(f *framework.Framework) {
 		By(fmt.Sprintf("Sending an http request from external app %q to the service %q in the cluster %q",
 			dockerIP, svcIP, clusterName))
 
-		command := []string{"curl", "-m", "10", fmt.Sprintf("%s:%d", svcIP, 80)}
+		command := []string{"curl", "-m", "10", fmt.Sprintf("%s:%d/%s%s", svcIP, 80, f.Namespace, clusterName)}
 		_, _ = docker.RunCommand(command...)
 
 		By("Verifying the pod received the request")
 
 		podLog := np.GetLog()
 
-		// TODO: also verify cluster that is directly connected to external app
-		// (source IP is not dockerIP in the case, so need to be checked by the other way).
-		if clusterName != externalClusterName {
-			Expect(podLog).To(ContainSubstring(dockerIP))
+		if clusterName == externalClusterName {
+			Expect(podLog).To(MatchRegexp(".*GET /%s%s .*", f.Namespace, clusterName))
+		} else {
+			Expect(podLog).To(MatchRegexp("%s .*GET /%s%s .*", dockerIP, f.Namespace, clusterName))
 		}
 
 		By(fmt.Sprintf("Sending an http request from the test pod %q %q in cluster %q to the external app %q",
 			np.Pod.Name, podIP, clusterName, dockerIP))
 
-		cmd := []string{"curl", "-m", "10", fmt.Sprintf("%s:%d", dockerIP, 80)}
+		cmd := []string{"curl", "-m", "10", fmt.Sprintf("%s:%d/%s%s", dockerIP, 80, f.Namespace, clusterName)}
 		_, _ = np.RunCommand(cmd)
 
 		By("Verifying that external app received request")
 		// Only check stderr
 		_, dockerLog := docker.GetLog()
 
-		// TODO: also verify cluster that is directly connected to external app
-		// (source IP is not podIP in the case, so need to be checked by the other way).
-		if clusterName != externalClusterName {
-			Expect(dockerLog).To(ContainSubstring(podIP))
+		if clusterName == externalClusterName {
+			Expect(dockerLog).To(MatchRegexp(".*GET /%s%s .*", f.Namespace, clusterName))
+		} else {
+			Expect(dockerLog).To(MatchRegexp("%s .*GET /%s%s .*", podIP, f.Namespace, clusterName))
 		}
 	}
 }
@@ -163,7 +163,7 @@ func testGlobalNetExternalConnectivity(f *framework.Framework) {
 		By(fmt.Sprintf("Sending an http request from external app %q to the service %q in the cluster %q",
 			dockerIP, remoteIP, clusterName))
 
-		command := []string{"curl", "-m", "10", fmt.Sprintf("%s:%d", remoteIP, 80)}
+		command := []string{"curl", "-m", "10", fmt.Sprintf("%s:%d/%s%s", remoteIP, 80, f.Namespace, clusterName)}
 		_, _ = docker.RunCommand(command...)
 
 		By("Verifying the pod received the request")
@@ -172,21 +172,21 @@ func testGlobalNetExternalConnectivity(f *framework.Framework) {
 		if framework.ClusterIndex(idx) == extClusterIdx {
 			// TODO: current behavior is that source IP from external app to the pod in the cluster that directly connected to
 			// external network is the gateway IP of the pod network. Consider if it can be consistent.
-			continue
+			Expect(podLog).To(MatchRegexp(".*GET /%s%s .*", f.Namespace, clusterName))
 		} else {
-			Expect(podLog).To(ContainSubstring(extEgressGlobalIP))
+			Expect(podLog).To(MatchRegexp("%s .*GET /%s%s .*", extEgressGlobalIP, f.Namespace, clusterName))
 		}
 		framework.Logf("%s", podLog)
 
 		By(fmt.Sprintf("Sending an http request from the test pod %q %q in cluster %q to the external app's ingressGlobalIP %q",
 			np.Pod.Name, podGlobalIP, clusterName, extIngressGlobalIP))
 
-		cmd := []string{"curl", "-m", "10", fmt.Sprintf("%s:%d", extIngressGlobalIP, 80)}
+		cmd := []string{"curl", "-m", "10", fmt.Sprintf("%s:%d/%s%s", extIngressGlobalIP, 80, f.Namespace, clusterName)}
 		_, _ = np.RunCommand(cmd)
 
 		By(fmt.Sprintf("Verifying that external app received request from egressGlobalIP %q", podGlobalIP))
 		_, dockerLog := docker.GetLog()
-		Expect(dockerLog).To(ContainSubstring(podGlobalIP))
+		Expect(dockerLog).To(MatchRegexp("%s .*GET /%s%s .*", podGlobalIP, f.Namespace, clusterName))
 		framework.Logf("%s", dockerLog)
 	}
 }
@@ -204,6 +204,7 @@ func getExternalClusterName(names []string) string {
 
 	return sortedNames[0]
 }
+
 func getExternalClusterIndex(names []string) framework.ClusterIndex {
 	clusterName := getExternalClusterName(names)
 
