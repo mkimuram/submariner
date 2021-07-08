@@ -117,12 +117,25 @@ func testGlobalNetExternalConnectivity(f *framework.Framework) {
 	externalClusterName := getExternalClusterName(framework.TestContext.ClusterIDs)
 	extClusterIdx := getExternalClusterIndex(framework.TestContext.ClusterIDs)
 
-	for idx := range framework.KubeClients {
-		if framework.ClusterIndex(idx) == extClusterIdx {
-			// TODO also do this case
-			continue
-		}
+	By(fmt.Sprintf("Creating a service without selector and endpoints in cluster %q", externalClusterName))
+	// Get handle for existing docker
+	docker := framework.New(extAppName)
+	dockerIP := docker.GetIP(extNetName)
 
+	// Create service without selector and endpoints for dockerIP, and export the service
+	extSvc := f.CreateTCPServiceWithoutSelector(extClusterIdx, "extsvc", "http", 80)
+	f.CreateTCPEndpoints(extClusterIdx, extSvc.Name, "http", dockerIP, 80)
+	f.CreateServiceExport(extClusterIdx, extSvc.Name)
+
+	// Get globalIPs for the extApp to use later
+	extIngressGlobalIP := f.AwaitGlobalIngressIP(extClusterIdx, extSvc.Name, extSvc.Namespace)
+	Expect(extIngressGlobalIP).ToNot(Equal(""))
+
+	extEgressGlobalIPs := f.AwaitClusterGlobalEgressIPs(extClusterIdx, constants.ClusterGlobalEgressIPName)
+	Expect(len(extEgressGlobalIPs)).ToNot(BeZero())
+	extEgressGlobalIP := extEgressGlobalIPs[0]
+
+	for idx := range framework.KubeClients {
 		clusterName := framework.TestContext.ClusterIDs[idx]
 
 		By(fmt.Sprintf("Creating a pod and a service in cluster %q", clusterName))
@@ -147,27 +160,6 @@ func testGlobalNetExternalConnectivity(f *framework.Framework) {
 		Expect(len(podGlobalIPs)).ToNot(BeZero())
 		podGlobalIP := podGlobalIPs[0]
 
-		By(fmt.Sprintf("Creating a service without selector and endpoints in cluster %q", externalClusterName))
-		// Get handle for existing docker
-		docker := framework.New(extAppName)
-		dockerIP := docker.GetIP(extNetName)
-
-		// Create service without selector and endpoints for dockerIP, and export the service
-		extSvc := f.CreateServiceWithoutSelector(extClusterIdx, "extsvc", 80)
-		f.CreateEndpoints(extClusterIdx, extSvc.Name, dockerIP, 80)
-		f.CreateServiceExport(extClusterIdx, extSvc.Name)
-
-		// Get globalIPs for the extApp to use later
-		// TODO: support globalIngressIP for service without selector and enable this code
-		// extIngressGlobalIP := f.AwaitGlobalIngressIP(extClusterIdx, extSvc.Name, extSvc.Namespace)
-		// Expect(extIngressGlobalIP).ToNot(Equal(""))
-		// TODO: fixme this is just to make test pass
-		extIngressGlobalIP := svc.Spec.ClusterIP
-
-		extEgressGlobalIPs := f.AwaitClusterGlobalEgressIPs(extClusterIdx, constants.ClusterGlobalEgressIPName)
-		Expect(len(extEgressGlobalIPs)).ToNot(BeZero())
-		extEgressGlobalIP := extEgressGlobalIPs[0]
-
 		By(fmt.Sprintf("Sending an http request from external app %q to the service %q in the cluster %q",
 			dockerIP, remoteIP, clusterName))
 
@@ -176,22 +168,26 @@ func testGlobalNetExternalConnectivity(f *framework.Framework) {
 
 		By("Verifying the pod received the request")
 
-		// TODO: fix globalnet to make external source IP seen as GlobalIP and check the IP
 		podLog := np.GetLog()
-		Expect(podLog).To(ContainSubstring(extEgressGlobalIP))
-		// framework.Logf("%s, %s, %s, %s, %s: %s", dockerIP, remoteIP, podGlobalIP, extIngressGlobalIP, extEgressGlobalIP, podLog)
+		if framework.ClusterIndex(idx) == extClusterIdx {
+			// TODO: current behavior is that source IP from external app to the pod in the cluster that directly connected to
+			// external network is the gateway IP of the pod network. Consider if it can be consistent.
+			continue
+		} else {
+			Expect(podLog).To(ContainSubstring(extEgressGlobalIP))
+		}
+		framework.Logf("%s", podLog)
 
-		By(fmt.Sprintf("Sending an http request from the test pod %q %q in cluster %q to the external app %q",
+		By(fmt.Sprintf("Sending an http request from the test pod %q %q in cluster %q to the external app's ingressGlobalIP %q",
 			np.Pod.Name, podGlobalIP, clusterName, extIngressGlobalIP))
 
 		cmd := []string{"curl", "-m", "10", fmt.Sprintf("%s:%d", extIngressGlobalIP, 80)}
 		_, _ = np.RunCommand(cmd)
 
-		By("Verifying that external app received request")
-		// Only check stderr
+		By(fmt.Sprintf("Verifying that external app received request from egressGlobalIP %q", podGlobalIP))
 		_, dockerLog := docker.GetLog()
-		// Expect(dockerLog).To(ContainSubstring(podGlobalIP))
-		framework.Logf("%s, %s, %s, %s, %s: %s", dockerIP, remoteIP, podGlobalIP, extIngressGlobalIP, extEgressGlobalIP, dockerLog)
+		Expect(dockerLog).To(ContainSubstring(podGlobalIP))
+		framework.Logf("%s", dockerLog)
 	}
 }
 
