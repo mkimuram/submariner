@@ -141,10 +141,11 @@ func testGlobalNetExternalConnectivity(f *framework.Framework) {
 		By(fmt.Sprintf("Creating a pod and a service in cluster %q", clusterName))
 
 		np := f.NewNetworkPod(&framework.NetworkPodConfig{
-			Type:          framework.CustomPod,
-			Port:          80,
-			Cluster:       framework.ClusterIndex(idx),
-			Scheduling:    framework.NonGatewayNode,
+			Type:    framework.CustomPod,
+			Port:    80,
+			Cluster: framework.ClusterIndex(idx),
+			// Also test NonGatewayNode
+			Scheduling:    framework.GatewayNode,
 			ContainerName: testContainerName,
 			ImageName:     testImage,
 			Command:       simpleHTTPServerCommand,
@@ -186,7 +187,13 @@ func testGlobalNetExternalConnectivity(f *framework.Framework) {
 
 		By(fmt.Sprintf("Verifying that external app received request from egressGlobalIP %q", podGlobalIP))
 		_, dockerLog := docker.GetLog()
-		Expect(dockerLog).To(MatchRegexp("%s .*GET /%s%s .*", podGlobalIP, f.Namespace, clusterName))
+		if framework.ClusterIndex(idx) == extClusterIdx {
+			// TODO: current behavior is that source IP from the pod in the cluster that directly connected to
+			// external network to external pod is not egressGlobalIP. Consider if it can be consistent.
+			Expect(dockerLog).To(MatchRegexp(".*GET /%s%s .*", f.Namespace, clusterName))
+		} else {
+			Expect(dockerLog).To(MatchRegexp("%s .*GET /%s%s .*", podGlobalIP, f.Namespace, clusterName))
+		}
 		framework.Logf("%s", dockerLog)
 	}
 }
