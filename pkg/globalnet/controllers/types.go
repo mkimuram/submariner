@@ -47,6 +47,9 @@ const (
 	// This is an internal annotation used between ingress pod controller and global-ingress controller.
 	headlessSvcPodIP = "submariner.io/headless-svc-pod-ip"
 
+	// This is an internal annotation used between ingress endpoints controller and global-ingress controller.
+	headlessSvcEndpointsIP = "submariner.io/headless-svc-endpoints-ip"
+
 	// Currently Submariner Globalnet implementation (for services) works with kube-proxy
 	// and uses iptable chain-names programmed by kube-proxy. If the internal implementation
 	// of kube-proxy changes, globalnet needs to be modified accordingly.
@@ -130,11 +133,12 @@ type globalIngressIPController struct {
 
 type serviceExportController struct {
 	*baseSyncerController
-	services       dynamic.NamespaceableResourceInterface
-	ingressIPs     dynamic.ResourceInterface
-	iptIface       iptiface.Interface
-	podControllers *IngressPodControllers
-	scheme         *runtime.Scheme
+	services             dynamic.NamespaceableResourceInterface
+	ingressIPs           dynamic.ResourceInterface
+	iptIface             iptiface.Interface
+	podControllers       *IngressPodControllers
+	endpointsControllers *IngressEndpointsControllers
+	scheme               *runtime.Scheme
 }
 
 type serviceController struct {
@@ -159,6 +163,20 @@ type ingressPodController struct {
 type IngressPodControllers struct {
 	sync.Mutex
 	controllers map[string]*ingressPodController
+	config      syncer.ResourceSyncerConfig
+	ingressIPs  dynamic.NamespaceableResourceInterface
+}
+
+type ingressEndpointsController struct {
+	*baseSyncerController
+	svcName      string
+	namespace    string
+	ingressIPMap stringset.Interface
+}
+
+type IngressEndpointsControllers struct {
+	sync.Mutex
+	controllers map[string]*ingressEndpointsController
 	config      syncer.ResourceSyncerConfig
 	ingressIPs  dynamic.NamespaceableResourceInterface
 }

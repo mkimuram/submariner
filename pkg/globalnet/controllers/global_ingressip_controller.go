@@ -73,6 +73,8 @@ func NewGlobalIngressIPController(config syncer.ResourceSyncerConfig, pool *ipam
 			target = gip.GetAnnotations()[kubeProxyIPTableChainAnnotation]
 		} else if gip.Spec.Target == submarinerv1.HeadlessServicePod {
 			target = gip.GetAnnotations()[headlessSvcPodIP]
+		} else if gip.Spec.Target == submarinerv1.HeadlessServiceEndpoints {
+			target = gip.GetAnnotations()[headlessSvcEndpointsIP]
 		}
 
 		if target == "" {
@@ -83,6 +85,15 @@ func NewGlobalIngressIPController(config syncer.ResourceSyncerConfig, pool *ipam
 			if gip.Spec.Target == submarinerv1.ClusterIPService {
 				return controller.iptIface.AddIngressRulesForService(reservedIPs[0], target)
 			} else if gip.Spec.Target == submarinerv1.HeadlessServicePod {
+				err := controller.iptIface.AddIngressRulesForHeadlessSvcPod(reservedIPs[0], target)
+				if err != nil {
+					return err
+				}
+
+				key, _ := cache.MetaNamespaceKeyFunc(obj)
+				return controller.iptIface.AddEgressRulesForHeadlessSVCPods(key, target, reservedIPs[0], globalNetIPTableMark)
+			} else if gip.Spec.Target == submarinerv1.HeadlessServiceEndpoints {
+				// TODO: fixme (Maybe only rename and change messages?)
 				err := controller.iptIface.AddIngressRulesForHeadlessSvcPod(reservedIPs[0], target)
 				if err != nil {
 					return err
@@ -203,6 +214,40 @@ func (c *globalIngressIPController) onCreate(ingressIP *submarinerv1.GlobalIngre
 			err = c.iptIface.AddEgressRulesForHeadlessSVCPods(key, podIP, ips[0], globalNetIPTableMark)
 			if err != nil {
 				_ = c.iptIface.RemoveIngressRulesForHeadlessSvcPod(ips[0], podIP)
+				err = errors.WithMessage(err, "Error programming egress rules")
+			}
+		}
+
+		if err != nil {
+			_ = c.pool.Release(ips...)
+			ingressIP.Status.Conditions = util.TryAppendCondition(ingressIP.Status.Conditions, metav1.Condition{
+				Type:    string(submarinerv1.GlobalEgressIPAllocated),
+				Status:  metav1.ConditionFalse,
+				Reason:  "ProgramIPTableRulesFailed",
+				Message: err.Error(),
+			})
+
+			return true
+		}
+	} else if ingressIP.Spec.Target == submarinerv1.HeadlessServiceEndpoints {
+		endpointsIP := ingressIP.GetAnnotations()[headlessSvcEndpointsIP]
+		if endpointsIP == "" {
+			_ = c.pool.Release(ips...)
+
+			klog.Warningf("%q annotation is missing on %q", headlessSvcEndpointsIP, key)
+
+			return true
+		}
+
+		// TODO: fixme (Just rename and modifying messages?)
+		err = c.iptIface.AddIngressRulesForHeadlessSvcPod(ips[0], endpointsIP)
+		if err != nil {
+			klog.Errorf("Error while programming Service %q ingress rules for Pod: %v", key, err)
+			err = errors.WithMessage(err, "Error programming ingress rules")
+		} else {
+			err = c.iptIface.AddEgressRulesForHeadlessSVCPods(key, endpointsIP, ips[0], globalNetIPTableMark)
+			if err != nil {
+				_ = c.iptIface.RemoveIngressRulesForHeadlessSvcPod(ips[0], endpointsIP)
 				err = errors.WithMessage(err, "Error programming egress rules")
 			}
 		}
