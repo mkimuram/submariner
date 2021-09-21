@@ -587,6 +587,11 @@ func (in *GlobalIngressIPSpec) DeepCopyInto(out *GlobalIngressIPSpec) {
 		*out = new(corev1.LocalObjectReference)
 		**out = **in
 	}
+	if in.EndpointsRef != nil {
+		in, out := &in.EndpointsRef, &out.EndpointsRef
+		*out = new(corev1.LocalObjectReference)
+		**out = **in
+	}
 	return
 }
 
