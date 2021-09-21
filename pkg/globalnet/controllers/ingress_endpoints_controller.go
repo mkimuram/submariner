@@ -76,8 +76,7 @@ func startIngressEndpointsController(svc *corev1.Service, config syncer.Resource
 
 	ingressIPs := config.SourceClient.Resource(*gvr).Namespace(corev1.NamespaceAll)
 	controller.reconcile(ingressIPs, func(obj *unstructured.Unstructured) runtime.Object {
-		// TODO: Consider adding endpointsRef field to GlobalIngressIPSpec
-		endpointsName, exists, _ := unstructured.NestedString(obj.Object, "spec", "podRef", "name")
+		endpointsName, exists, _ := unstructured.NestedString(obj.Object, "spec", "endpointsRef", "name")
 		if exists {
 			return &corev1.Endpoints{
 				ObjectMeta: metav1.ObjectMeta{
@@ -133,10 +132,9 @@ func (c *ingressEndpointsController) process(from runtime.Object, numRequeues in
 	}
 
 	ingressIP.Spec = submarinerv1.GlobalIngressIPSpec{
-		Target:     submarinerv1.HeadlessServiceEndpoints,
-		ServiceRef: &corev1.LocalObjectReference{Name: c.svcName},
-		// TODO: Consider adding endpointsRef field to GlobalIngressIPSpec
-		PodRef: &corev1.LocalObjectReference{Name: endpoints.Name},
+		Target:       submarinerv1.HeadlessServiceEndpoints,
+		ServiceRef:   &corev1.LocalObjectReference{Name: c.svcName},
+		EndpointsRef: &corev1.LocalObjectReference{Name: endpoints.Name},
 	}
 
 	c.ingressIPMap.Add(ingressIP.Name)
