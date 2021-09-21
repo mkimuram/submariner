@@ -101,7 +101,7 @@ func (c *ingressEndpointsController) process(from runtime.Object, numRequeues in
 
 	ingressIP := &submarinerv1.GlobalIngressIP{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("ep-%.59s", endpoints.Name),
+			Name:      fmt.Sprintf("ep-%.60s", endpoints.Name),
 			Namespace: endpoints.Namespace,
 			Labels: map[string]string{
 				ServiceRefLabel: c.svcName,
@@ -111,12 +111,11 @@ func (c *ingressEndpointsController) process(from runtime.Object, numRequeues in
 
 	if op == syncer.Delete {
 		c.ingressIPMap.Remove(ingressIP.Name)
-		klog.Infof("ingress Endpoints %s for service %s deleted", key, c.svcName)
+		klog.Infof("Ingress Endpoints %s for service %s deleted", key, c.svcName)
 
 		return ingressIP, false
 	}
 
-	// TODO: consider other conditions
 	if c.ingressIPMap.Contains(ingressIP.Name) {
 		// Avoid assigning ingressIPs to endpoints that are not ready with an endpoint IP
 		return nil, false

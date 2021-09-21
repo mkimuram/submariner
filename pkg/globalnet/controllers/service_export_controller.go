@@ -37,7 +37,8 @@ import (
 	mcsv1a1 "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
 )
 
-func NewServiceExportController(config syncer.ResourceSyncerConfig, podControllers *IngressPodControllers, endpointsControllers *IngressEndpointsControllers) (Interface, error) {
+func NewServiceExportController(config syncer.ResourceSyncerConfig, podControllers *IngressPodControllers,
+	endpointsControllers *IngressEndpointsControllers) (Interface, error) {
 	var err error
 
 	klog.Info("Creating ServiceExport controller")

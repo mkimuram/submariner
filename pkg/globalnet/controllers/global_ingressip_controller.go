@@ -69,12 +69,15 @@ func NewGlobalIngressIPController(config syncer.ResourceSyncerConfig, pool *ipam
 		_ = runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, gip)
 
 		var target string
+		var tType iptables.TargetType
 		if gip.Spec.Target == submarinerv1.ClusterIPService {
 			target = gip.GetAnnotations()[kubeProxyIPTableChainAnnotation]
 		} else if gip.Spec.Target == submarinerv1.HeadlessServicePod {
 			target = gip.GetAnnotations()[headlessSvcPodIP]
+			tType = iptables.PodTarget
 		} else if gip.Spec.Target == submarinerv1.HeadlessServiceEndpoints {
 			target = gip.GetAnnotations()[headlessSvcEndpointsIP]
+			tType = iptables.EndpointsTarget
 		}
 
 		if target == "" {
@@ -84,23 +87,14 @@ func NewGlobalIngressIPController(config syncer.ResourceSyncerConfig, pool *ipam
 		err = controller.reserveAllocatedIPs(federator, obj, func(reservedIPs []string) error {
 			if gip.Spec.Target == submarinerv1.ClusterIPService {
 				return controller.iptIface.AddIngressRulesForService(reservedIPs[0], target)
-			} else if gip.Spec.Target == submarinerv1.HeadlessServicePod {
-				err := controller.iptIface.AddIngressRulesForHeadlessSvcPod(reservedIPs[0], target)
+			} else if gip.Spec.Target == submarinerv1.HeadlessServicePod || gip.Spec.Target == submarinerv1.HeadlessServiceEndpoints {
+				err := controller.iptIface.AddIngressRulesForHeadlessSvc(reservedIPs[0], target, tType)
 				if err != nil {
 					return err
 				}
 
 				key, _ := cache.MetaNamespaceKeyFunc(obj)
-				return controller.iptIface.AddEgressRulesForHeadlessSVCPods(key, target, reservedIPs[0], globalNetIPTableMark)
-			} else if gip.Spec.Target == submarinerv1.HeadlessServiceEndpoints {
-				// TODO: fixme (Maybe only rename and change messages?)
-				err := controller.iptIface.AddIngressRulesForHeadlessSvcPod(reservedIPs[0], target)
-				if err != nil {
-					return err
-				}
-
-				key, _ := cache.MetaNamespaceKeyFunc(obj)
-				return controller.iptIface.AddEgressRulesForHeadlessSVCPods(key, target, reservedIPs[0], globalNetIPTableMark)
+				return controller.iptIface.AddEgressRulesForHeadlessSVC(key, target, reservedIPs[0], globalNetIPTableMark, tType)
 			}
 			return nil
 		})
@@ -171,6 +165,32 @@ func (c *globalIngressIPController) onCreate(ingressIP *submarinerv1.GlobalIngre
 		return true
 	}
 
+	var target string
+	var tType iptables.TargetType
+	if ingressIP.Spec.Target == submarinerv1.HeadlessServicePod {
+		target = ingressIP.GetAnnotations()[headlessSvcPodIP]
+		if target == "" {
+			_ = c.pool.Release(ips...)
+
+			klog.Warningf("%q annotation is missing on %q", headlessSvcPodIP, key)
+
+			return true
+		}
+
+		tType = iptables.PodTarget
+	} else if ingressIP.Spec.Target == submarinerv1.HeadlessServiceEndpoints {
+		target = ingressIP.GetAnnotations()[headlessSvcEndpointsIP]
+		if target == "" {
+			_ = c.pool.Release(ips...)
+
+			klog.Warningf("%q annotation is missing on %q", headlessSvcEndpointsIP, key)
+
+			return true
+		}
+
+		tType = iptables.EndpointsTarget
+	}
+
 	if ingressIP.Spec.Target == submarinerv1.ClusterIPService {
 		chainName := ingressIP.GetAnnotations()[kubeProxyIPTableChainAnnotation]
 		if chainName == "" {
@@ -196,58 +216,15 @@ func (c *globalIngressIPController) onCreate(ingressIP *submarinerv1.GlobalIngre
 
 			return true
 		}
-	} else if ingressIP.Spec.Target == submarinerv1.HeadlessServicePod {
-		podIP := ingressIP.GetAnnotations()[headlessSvcPodIP]
-		if podIP == "" {
-			_ = c.pool.Release(ips...)
-
-			klog.Warningf("%q annotation is missing on %q", headlessSvcPodIP, key)
-
-			return true
-		}
-
-		err = c.iptIface.AddIngressRulesForHeadlessSvcPod(ips[0], podIP)
+	} else if ingressIP.Spec.Target == submarinerv1.HeadlessServicePod || ingressIP.Spec.Target == submarinerv1.HeadlessServiceEndpoints {
+		err = c.iptIface.AddIngressRulesForHeadlessSvc(ips[0], target, tType)
 		if err != nil {
 			klog.Errorf("Error while programming Service %q ingress rules for Pod: %v", key, err)
 			err = errors.WithMessage(err, "Error programming ingress rules")
 		} else {
-			err = c.iptIface.AddEgressRulesForHeadlessSVCPods(key, podIP, ips[0], globalNetIPTableMark)
+			err = c.iptIface.AddEgressRulesForHeadlessSVC(key, target, ips[0], globalNetIPTableMark, tType)
 			if err != nil {
-				_ = c.iptIface.RemoveIngressRulesForHeadlessSvcPod(ips[0], podIP)
-				err = errors.WithMessage(err, "Error programming egress rules")
-			}
-		}
-
-		if err != nil {
-			_ = c.pool.Release(ips...)
-			ingressIP.Status.Conditions = util.TryAppendCondition(ingressIP.Status.Conditions, metav1.Condition{
-				Type:    string(submarinerv1.GlobalEgressIPAllocated),
-				Status:  metav1.ConditionFalse,
-				Reason:  "ProgramIPTableRulesFailed",
-				Message: err.Error(),
-			})
-
-			return true
-		}
-	} else if ingressIP.Spec.Target == submarinerv1.HeadlessServiceEndpoints {
-		endpointsIP := ingressIP.GetAnnotations()[headlessSvcEndpointsIP]
-		if endpointsIP == "" {
-			_ = c.pool.Release(ips...)
-
-			klog.Warningf("%q annotation is missing on %q", headlessSvcEndpointsIP, key)
-
-			return true
-		}
-
-		// TODO: fixme (Just rename and modifying messages?)
-		err = c.iptIface.AddIngressRulesForHeadlessSvcPod(ips[0], endpointsIP)
-		if err != nil {
-			klog.Errorf("Error while programming Service %q ingress rules for Pod: %v", key, err)
-			err = errors.WithMessage(err, "Error programming ingress rules")
-		} else {
-			err = c.iptIface.AddEgressRulesForHeadlessSVCPods(key, endpointsIP, ips[0], globalNetIPTableMark)
-			if err != nil {
-				_ = c.iptIface.RemoveIngressRulesForHeadlessSvcPod(ips[0], endpointsIP)
+				_ = c.iptIface.RemoveIngressRulesForHeadlessSvc(ips[0], target, tType)
 				err = errors.WithMessage(err, "Error programming egress rules")
 			}
 		}
@@ -285,19 +262,28 @@ func (c *globalIngressIPController) onDelete(ingressIP *submarinerv1.GlobalIngre
 	key, _ := cache.MetaNamespaceKeyFunc(ingressIP)
 
 	return c.flushRulesAndReleaseIPs(key, numRequeues, func(allocatedIPs []string) error {
+		var target string
+		var tType iptables.TargetType
+		if ingressIP.Spec.Target == submarinerv1.HeadlessServicePod {
+			target = ingressIP.GetAnnotations()[headlessSvcPodIP]
+			tType = iptables.PodTarget
+		} else if ingressIP.Spec.Target == submarinerv1.HeadlessServiceEndpoints {
+			target = ingressIP.GetAnnotations()[headlessSvcEndpointsIP]
+			tType = iptables.EndpointsTarget
+		}
+
 		if ingressIP.Spec.Target == submarinerv1.ClusterIPService {
 			chainName := ingressIP.GetAnnotations()[kubeProxyIPTableChainAnnotation]
 			if chainName != "" {
 				return c.iptIface.RemoveIngressRulesForService(ingressIP.Status.AllocatedIP, chainName)
 			}
-		} else if ingressIP.Spec.Target == submarinerv1.HeadlessServicePod {
-			podIP := ingressIP.GetAnnotations()[headlessSvcPodIP]
-			if podIP != "" {
-				if err := c.iptIface.RemoveIngressRulesForHeadlessSvcPod(ingressIP.Status.AllocatedIP, podIP); err != nil {
+		} else if ingressIP.Spec.Target == submarinerv1.HeadlessServicePod || ingressIP.Spec.Target == submarinerv1.HeadlessServiceEndpoints {
+			if target != "" {
+				if err := c.iptIface.RemoveIngressRulesForHeadlessSvc(ingressIP.Status.AllocatedIP, target, tType); err != nil {
 					return err
 				}
 
-				return c.iptIface.RemoveEgressRulesForHeadlessSVCPods(key, podIP, ingressIP.Status.AllocatedIP, globalNetIPTableMark)
+				return c.iptIface.RemoveEgressRulesForHeadlessSVC(key, target, ingressIP.Status.AllocatedIP, globalNetIPTableMark, tType)
 			}
 		}
 
