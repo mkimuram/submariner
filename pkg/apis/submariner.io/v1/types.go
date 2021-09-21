@@ -318,6 +318,10 @@ type GlobalIngressIPSpec struct {
 	// The reference to a targeted Pod, if applicable.
 	// +Optional
 	PodRef *corev1.LocalObjectReference `json:"podRef,omitempty"`
+
+	// The reference to a targeted Endpoints, if applicable.
+	// +Optional
+	EndpointsRef *corev1.LocalObjectReference `json:"endpointsRef,omitempty"`
 }
 
 type TargetType string
