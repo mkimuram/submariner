@@ -19,6 +19,7 @@ limitations under the License.
 package controllers
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
@@ -31,6 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
@@ -49,6 +51,7 @@ func startIngressEndpointsController(svc *corev1.Service, config syncer.Resource
 		svcName:              svc.Name,
 		namespace:            svc.Namespace,
 		ingressIPMap:         stringset.NewSynchronized(),
+		ingressIPs:           config.SourceClient.Resource(*gvr),
 	}
 
 	fieldSelector := fields.Set(map[string]string{"metadata.name": svc.Name}).AsSelector().String()
@@ -98,47 +101,68 @@ func (c *ingressEndpointsController) process(from runtime.Object, numRequeues in
 	endpoints := from.(*corev1.Endpoints)
 	key, _ := cache.MetaNamespaceKeyFunc(endpoints)
 
-	ingressIP := &submarinerv1.GlobalIngressIP{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("ep-%.60s", endpoints.Name),
-			Namespace: endpoints.Namespace,
-			Labels: map[string]string{
-				ServiceRefLabel: c.svcName,
-			},
-		},
+	svcSelector := labels.SelectorFromSet(map[string]string{ServiceRefLabel: c.svcName}).String()
+	gips, err := c.ingressIPs.Namespace(endpoints.Namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: svcSelector})
+	if err != nil {
+		return nil, false
 	}
 
 	if op == syncer.Delete {
-		c.ingressIPMap.Remove(ingressIP.Name)
 		klog.Infof("Ingress Endpoints %s for service %s deleted", key, c.svcName)
 
-		return ingressIP, false
-	}
+		for i := range gips.Items {
+			obj := &gips.Items[i]
+			gip := &submarinerv1.GlobalIngressIP{}
+			_ = runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, gip)
 
-	if c.ingressIPMap.Contains(ingressIP.Name) {
-		// Avoid assigning ingressIPs to endpoints that are not ready with an endpoint IP
-		return nil, false
+			klog.Infof("Removing GlobalIngressIP %s for service %s deletion in namespece %s", gip.Name, endpoints.Name, endpoints.Namespace)
+			c.ingressIPMap.Remove(gip.Name)
+		}
+
+		return gips, false
 	}
 
 	klog.Infof("%q ingress Endpoints %s for service %s", op, key, c.svcName)
 
-	// TODO: consider handling multiple endpoints IPs
-	if len(endpoints.Subsets) == 0 || len(endpoints.Subsets[0].Addresses) == 0 {
+	// Create unique list of endpoints IPs
+	epIPs := map[string]bool{}
+	for _, subset := range endpoints.Subsets {
+		for _, addr := range subset.Addresses {
+			epIPs[addr.IP] = true
+		}
+	}
+
+	if len(epIPs) == 0 {
 		return nil, false
 	}
 
-	ingressIP.ObjectMeta.Annotations = map[string]string{
-		headlessSvcEndpointsIP: endpoints.Subsets[0].Addresses[0].IP,
-	}
+	c.resourceSyncer.Reconcile(func() []runtime.Object {
+		ingressIPs := make([]runtime.Object, 0, len(epIPs))
+		for epIP := range epIPs {
+			ingressIP := &submarinerv1.GlobalIngressIP{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("ep-%.60s", epIP),
+					Namespace: endpoints.Namespace,
+					Labels: map[string]string{
+						ServiceRefLabel: c.svcName,
+					},
+					Annotations: map[string]string{
+						headlessSvcEndpointsIP: epIP,
+					},
+				},
+				Spec: submarinerv1.GlobalIngressIPSpec{
+					Target:     submarinerv1.HeadlessServiceEndpoints,
+					ServiceRef: &corev1.LocalObjectReference{Name: c.svcName},
+				},
+			}
 
-	ingressIP.Spec = submarinerv1.GlobalIngressIPSpec{
-		Target:     submarinerv1.HeadlessServiceEndpoints,
-		ServiceRef: &corev1.LocalObjectReference{Name: c.svcName},
-	}
+			c.ingressIPMap.Add(ingressIP.Name)
+			ingressIPs = append(ingressIPs, ingressIP)
+		}
+		return ingressIPs
+	})
 
-	c.ingressIPMap.Add(ingressIP.Name)
-
-	return ingressIP, false
+	return nil, false
 }
 
 func areEndpointsEqual(obj1, obj2 *unstructured.Unstructured) bool {

@@ -172,6 +172,7 @@ type ingressEndpointsController struct {
 	svcName      string
 	namespace    string
 	ingressIPMap stringset.Interface
+	ingressIPs   dynamic.NamespaceableResourceInterface
 }
 
 type IngressEndpointsControllers struct {
