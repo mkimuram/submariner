@@ -301,6 +301,13 @@ func (g *gatewayMonitor) startControllers() error {
 
 	g.controllers = append(g.controllers, c)
 
+	c, err = NewEndpointsController(g.syncerConfig)
+	if err != nil {
+		return errors.Wrap(err, "error creating the Endpoints controller")
+	}
+
+	g.controllers = append(g.controllers, c)
+
 	for _, c := range g.controllers {
 		err = c.Start()
 		if err != nil {

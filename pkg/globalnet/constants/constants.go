@@ -31,5 +31,7 @@ const (
 	SmGlobalnetEgressChainForNamespace       = "SM-GN-EGRESS-NS"
 	SmGlobalnetEgressChainForCluster         = "SM-GN-EGRESS-CLUSTER"
 
-	SmGlobalIP = "submariner.io/globalIp"
+	SmGlobalIP         = "submariner.io/globalIp"
+	SmExportedEndpoint = "endpoints.submariner.io/exported"
+	SmLabelTrue        = "true"
 )

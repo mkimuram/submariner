@@ -167,3 +167,8 @@ type IngressPodControllers struct {
 	config      syncer.ResourceSyncerConfig
 	ingressIPs  dynamic.NamespaceableResourceInterface
 }
+
+type endpointsController struct {
+	*baseSyncerController
+	endpoints dynamic.ResourceInterface
+}
