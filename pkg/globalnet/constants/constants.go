@@ -20,6 +20,7 @@ package constants
 
 const (
 	ClusterGlobalEgressIPName = "cluster-egress.submariner.io"
+	ExportedEndpoint          = "endpoints.submariner.io/exported"
 
 	SmGlobalnetIngressChain = "SUBMARINER-GN-INGRESS"
 	SmGlobalnetEgressChain  = "SUBMARINER-GN-EGRESS"
@@ -31,7 +32,5 @@ const (
 	SmGlobalnetEgressChainForNamespace       = "SM-GN-EGRESS-NS"
 	SmGlobalnetEgressChainForCluster         = "SM-GN-EGRESS-CLUSTER"
 
-	SmGlobalIP         = "submariner.io/globalIp"
-	SmExportedEndpoint = "endpoints.submariner.io/exported"
-	SmLabelTrue        = "true"
+	SmGlobalIP = "submariner.io/globalIp"
 )

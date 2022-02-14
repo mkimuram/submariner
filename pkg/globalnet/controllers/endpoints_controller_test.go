@@ -22,6 +22,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/submariner-io/admiral/pkg/syncer"
+	"github.com/submariner-io/submariner/pkg/globalnet/constants"
 	"github.com/submariner-io/submariner/pkg/globalnet/controllers"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -34,7 +35,7 @@ var _ = Describe("Endpoints controller", func() {
 		ep     *corev1.Endpoints
 	)
 
-	When("an endpoints without label is created", func() {
+	When("an Endpoints resource without the exported label is created", func() {
 		BeforeEach(func() {
 			epName = "epWithoutLabel"
 			t.createEndpoints(newEndpoints(epName, map[string]string{}))
@@ -46,10 +47,10 @@ var _ = Describe("Endpoints controller", func() {
 		})
 	})
 
-	When("an endpoints with label is created", func() {
+	When("an Endpoints resource with the exported label is created", func() {
 		BeforeEach(func() {
 			epName = "epWithLabel"
-			ep = t.createEndpoints(newEndpoints(epName, map[string]string{"endpoints.submariner.io/exported": "true"}))
+			ep = t.createEndpoints(newEndpoints(epName, map[string]string{constants.ExportedEndpoint: "true"}))
 			t.awaitEndpoints(epName)
 		})
 

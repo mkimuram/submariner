@@ -81,7 +81,7 @@ func (c *endpointsController) process(from runtime.Object, numRequeues int, op s
 	ep := from.(*corev1.Endpoints)
 
 	// Skip endpoints without "endpoints.submariner.io/exported: true" label
-	if val, ok := ep.Labels[constants.SmExportedEndpoint]; !ok || val != constants.SmLabelTrue {
+	if val, ok := ep.Labels[constants.ExportedEndpoint]; !ok || val != "true" {
 		return nil, false
 	}
 
@@ -103,7 +103,7 @@ func (c *endpointsController) onCreate(ep *corev1.Endpoints) (runtime.Object, bo
 
 	clonedEp := ep.DeepCopy()
 	clonedEp.ObjectMeta.Name = GetInternalSvcName(clonedEp.ObjectMeta.Name)
-	delete(clonedEp.Labels, constants.SmExportedEndpoint)
+	delete(clonedEp.Labels, constants.ExportedEndpoint)
 
 	klog.Infof("Creating %#v", clonedEp)
 
