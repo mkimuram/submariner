@@ -135,11 +135,12 @@ type globalIngressIPController struct {
 
 type serviceExportController struct {
 	*baseSyncerController
-	services       dynamic.NamespaceableResourceInterface
-	ingressIPs     dynamic.ResourceInterface
-	iptIface       iptiface.Interface
-	podControllers *IngressPodControllers
-	scheme         *runtime.Scheme
+	services             dynamic.NamespaceableResourceInterface
+	ingressIPs           dynamic.ResourceInterface
+	iptIface             iptiface.Interface
+	podControllers       *IngressPodControllers
+	endpointsControllers *ServiceExportEndpointsControllers
+	scheme               *runtime.Scheme
 }
 
 type serviceController struct {
@@ -170,5 +171,13 @@ type IngressPodControllers struct {
 
 type endpointsController struct {
 	*baseSyncerController
-	endpoints dynamic.ResourceInterface
+	name      string
+	namespace string
+	endpoints dynamic.NamespaceableResourceInterface
+}
+
+type ServiceExportEndpointsControllers struct {
+	mutex       sync.Mutex
+	controllers map[string]*endpointsController
+	config      syncer.ResourceSyncerConfig
 }

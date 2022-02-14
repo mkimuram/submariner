@@ -19,7 +19,6 @@ limitations under the License.
 package dataplane
 
 import (
-	"context"
 	"fmt"
 	"sort"
 
@@ -27,10 +26,6 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/submariner-io/shipyard/test/e2e/framework"
 	"github.com/submariner-io/submariner/pkg/globalnet/constants"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	typedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
 const (
@@ -129,8 +124,7 @@ func testGlobalNetExternalConnectivity(f *framework.Framework) {
 
 	// Create service without selector and endpoints for dockerIP, and export the service.
 	extSvc := f.CreateTCPServiceWithoutSelector(extClusterIdx, "extsvc", "http", 80)
-	createTCPEndpointsWithLabel(f, extClusterIdx, extSvc.Name, "http", dockerIP, 80,
-		map[string]string{"endpoints.submariner.io/exported": "true"})
+	f.CreateTCPEndpoints(extClusterIdx, extSvc.Name, "http", dockerIP, 80)
 	f.CreateServiceExport(extClusterIdx, extSvc.Name)
 
 	// Get globalIPs for the extApp to use later.
@@ -239,48 +233,4 @@ func getExternalClusterIndex(names []string) framework.ClusterIndex {
 
 	// TODO: consider right error handling.
 	return framework.ClusterIndex(0)
-}
-
-func createTCPEndpointsWithLabel(f *framework.Framework, cluster framework.ClusterIndex, epName, portName, address string, port int,
-	labels map[string]string) *corev1.Endpoints {
-	endpointsSpec := corev1.Endpoints{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   epName,
-			Labels: labels,
-		},
-		Subsets: []corev1.EndpointSubset{
-			{
-				Addresses: []corev1.EndpointAddress{
-					{IP: address},
-				},
-				Ports: []corev1.EndpointPort{
-					{
-						Name:     portName,
-						Port:     int32(port),
-						Protocol: corev1.ProtocolTCP,
-					},
-				},
-			},
-		},
-	}
-
-	ec := framework.KubeClients[cluster].CoreV1().Endpoints(f.Namespace)
-
-	return createEndpoints(ec, &endpointsSpec)
-}
-
-func createEndpoints(ec typedv1.EndpointsInterface, endpointsSpec *corev1.Endpoints) *corev1.Endpoints {
-	return framework.AwaitUntil("create endpoints", func() (interface{}, error) {
-		ep, err := ec.Create(context.TODO(), endpointsSpec, metav1.CreateOptions{})
-		if errors.IsAlreadyExists(err) {
-			err = ec.Delete(context.TODO(), endpointsSpec.Name, metav1.DeleteOptions{})
-			if err != nil {
-				return nil, err
-			}
-
-			ep, err = ec.Create(context.TODO(), endpointsSpec, metav1.CreateOptions{})
-		}
-
-		return ep, err
-	}, framework.NoopCheckResult).(*corev1.Endpoints)
 }

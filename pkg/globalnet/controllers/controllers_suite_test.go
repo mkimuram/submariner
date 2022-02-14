@@ -209,6 +209,11 @@ func (t *testDriverBase) deleteEndpoints(ep *corev1.Endpoints) {
 	Expect(err).To(Succeed())
 }
 
+func (t *testDriverBase) updateEndpoints(ep *corev1.Endpoints) *corev1.Endpoints {
+	test.UpdateResource(t.endpoints, ep)
+	return ep
+}
+
 func (t *testDriverBase) createService(service *corev1.Service) *corev1.Service {
 	test.CreateResource(t.services, service)
 	return service
@@ -398,6 +403,26 @@ func (t *testDriverBase) awaitEndpoints(name string) *corev1.Endpoints {
 func (t *testDriverBase) awaitNoEndpoints(name string) {
 	time.Sleep(300 * time.Millisecond)
 	test.AwaitNoResource(t.endpoints, name)
+}
+
+func (t *testDriverBase) awaitEndpointsHasIP(name, ip string) {
+	Eventually(func() bool {
+		obj, err := t.endpoints.Get(context.TODO(), name, metav1.GetOptions{})
+		Expect(err).To(Succeed())
+
+		ep := &corev1.Endpoints{}
+		Expect(runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, ep)).To(Succeed())
+
+		for _, subset := range ep.Subsets {
+			for _, address := range subset.Addresses {
+				if address.IP == ip {
+					return true
+				}
+			}
+		}
+
+		return false
+	}, 5).Should(BeTrue())
 }
 
 func (t *testDriverBase) awaitHeadlessGlobalIngressIP(svcName, podName string) *submarinerv1.GlobalIngressIP {
@@ -609,7 +634,21 @@ func newHeadlessServicePod(svcName string) *corev1.Pod {
 	}
 }
 
-func newEndpoints(svcName string, labels map[string]string) *corev1.Endpoints {
+func newServiceWithoutSelector() *corev1.Service {
+	return toServiceWithoutSelector(newClusterIPService())
+}
+
+func toServiceWithoutSelector(s *corev1.Service) *corev1.Service {
+	s.Spec.Selector = map[string]string{}
+
+	return s
+}
+
+func newDefaultEndpoints(svcName string) *corev1.Endpoints {
+	return newEndpoints(svcName, "172.45.5.6", map[string]string{})
+}
+
+func newEndpoints(svcName, ip string, labels map[string]string) *corev1.Endpoints {
 	return &corev1.Endpoints{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      svcName,
@@ -619,7 +658,7 @@ func newEndpoints(svcName string, labels map[string]string) *corev1.Endpoints {
 		Subsets: []corev1.EndpointSubset{
 			{
 				Addresses: []corev1.EndpointAddress{
-					{IP: "172.45.5.6"},
+					{IP: ip},
 				},
 				Ports: []corev1.EndpointPort{
 					{
